@@ -69,7 +69,7 @@ class Actor(object):
         top = 0
         bottom = 0
         for agent in self.model.Actors:
-            d = (abs(agent.x - alter.x) - abs(agent.x - self.x))
+            d = abs(agent.x - alter.x) - abs(agent.x - self.x)
             if d > 0:
                 top += agent.c * agent.s * d
             bottom += agent.c * agent.s * abs(d)
@@ -84,8 +84,8 @@ class Actor(object):
         utils = self.basic_utilities[alter.name]
         Q = self.model.Q
         T = self.model.T
-
-        EU = alter.s * (p * utils["Us"] + (1-p)*utils["Uf"]) + (1-alter.s)*utils["Us"]
+        s = self.s
+        EU = s * (p * utils["Us"] + (1-p)*utils["Uf"]) + (1-s)*utils["Us"]
         EU -= Q*utils["Usq"] - (1-Q)*(T*utils["Ub"] + (1-T)*utils["Uw"])
         self.expected_utilities[alter.name] = EU
 
