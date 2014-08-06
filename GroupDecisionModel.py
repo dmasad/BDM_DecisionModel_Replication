@@ -36,6 +36,7 @@ class Actor(object):
         self.basic_utilities = {}
         self.probs = {}
         self.expected_utilities = {}
+        self.offers = [] # Incoming challenges
 
 
     def calculate_utilities(self, alter):
@@ -108,6 +109,49 @@ class Actor(object):
         R = (2 * sum(attack_utils) - max_security - min_security) / (max_security - min_security)
         self.r = (1 - R/3)/(1+R/3)
 
+    def send_offers(self):
+        '''
+        Send 'offers' of confrontation to different actors.
+        '''
+        for actor in self.model.Actors:
+            if actor.name in self.expected_utilities:
+                if self.expected_utilities[actor.name] > 0:
+                    # Send a challenge!
+                    offer = {"Sender": self.name,
+                            "x": self.x, # Target position
+                            "EU": self.expected_utilities[actor.name]
+                            }
+                    actor.offers.append(offer)
+    def choose_offer(self):
+        '''
+        Choose the offer to accept, and change position accordingly.
+        '''
+        if len(self.offers) == 0: return
+
+        max_util = max([offer["EU"] for offer in self.offers])
+        self.offers = [offer for offer in self.offers if offer["EU"] == max_util]
+        offer = min(self.offers, key=lambda x: x["x"])
+
+        # Resolve offer
+        Uj = offer["EU"]
+        Ui = self.expected_utilities[offer["Sender"]]
+        if Ui > 0 and Ui < Uj:
+            # There was a conflict, and this actor lost
+            print self.name + " changing position!"
+            self.x = offer["x"]
+            # If the actor won the conflict, action will be taken on the other end
+        elif Ui < 0 and abs(Ui) < Uj:
+            # Compromise
+            print self.name + " changing position!"
+            self.x += (offer["x"] - self.x) * abs(Ui/Uj)
+        elif Ui < 0 and abs(Ui) > Uj:
+            # Capituate
+            print self.name + " changing position!"
+            self.x = offer["x"]
+
+        self.offers = [] # Reset offers
+
+
 
 
 
@@ -131,7 +175,8 @@ class Model(object):
 
     def vote(self, verbose=True):
         '''
-        Find the current median voter
+        Find the current Condorcet winner
+        TODO: Make it the actual Condorcet winner though
         '''
         pairwise_contests = {}
         for j in self.Actors:
@@ -145,6 +190,58 @@ class Model(object):
             for key, val in pairwise_contests.items():
                 print key, val
         return max(pairwise_contests, key=lambda x: pairwise_contests[x])[0]
+
+    def find_mean(self):
+        '''
+        Find the current mean voter position
+        '''
+        t = 0 # Running weighted total
+        w = 0 # Running total weight
+        for actor in self.Actors:
+            w += actor.s * actor.c
+            t += actor.s * actor.c * actor.x
+        return t/w
+
+
+    def make_offers_happen(self):
+        '''
+        Each actor sends offers / challenges to others
+        '''
+        for actor in self.Actors:
+            actor.send_offers()
+
+    def determine_offers(self):
+        '''
+        Figure out which octant each dyad is in
+        '''
+
+        for i, actor1 in enumerate(self.Actors):
+            for actor2 in self.Actors[i+1:]:
+                Ui = actor1.expected_utilities[actor2.name]
+                Uj = actor2.expected_utilities[actor1.name]
+                if Ui > 0:
+                    # Actor1 challenges
+                    if Uj > 0:
+                        # Conflict: Actor2 challenges as well.
+                        if Ui > Uj:
+                            #Confrontation, Actor 1 wins
+                            result = "Conflict, " + actor1.name + " wins."
+                        else:
+                            result = "Conflict, " + actor2.name + " wins."
+                    else:
+                        if abs(Uj) < Ui:
+                            result = "Compromise, " + actor1.name + " wins."
+                        else:
+                            result = "Compel, " + actor1.name + "wins"
+                elif Uj > 0:
+                    if abs(Ui) < Uj:
+                        result = "Compromise, " + actor2.name + " wins."
+                    else:
+                        result = "Complel, " + actor2.name + " wins."
+                else:
+                    result = "Status Quo"
+                print actor1.name, actor2.name, result
+
 
 
 
