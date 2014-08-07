@@ -85,7 +85,7 @@ class Actor(object):
         Q = self.model.Q
         T = self.model.T
         s = self.s
-        EU = s * (p * utils["Us"] + (1-p)*utils["Uf"]) + (1-s)*utils["Us"]
+        EU = s * (p * utils["Us"] + (1-p)*utils["Uf"]) + (100-s)*utils["Us"]
         EU -= Q*utils["Usq"] - (1-Q)*(T*utils["Ub"] + (1-T)*utils["Uw"])
         self.expected_utilities[alter.name] = EU
 
@@ -130,7 +130,7 @@ class Actor(object):
 
         max_util = max([offer["EU"] for offer in self.offers])
         self.offers = [offer for offer in self.offers if offer["EU"] == max_util]
-        offer = min(self.offers, key=lambda x: x["x"])
+        offer = min(self.offers, key=lambda x: abs(self.x-x["x"]))
 
         # Resolve offer
         Uj = offer["EU"]
