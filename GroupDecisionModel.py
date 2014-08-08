@@ -1,9 +1,6 @@
 '''
 Unravelling "Unravelling BDM's group decision model"
 
-Because discrete, algorithmic game theory works better as code, you guys.
-
-Without loss of generality, assume that x ina [0, 1].
 '''
 
 from __future__ import division
@@ -48,8 +45,8 @@ class Actor(object):
 
         Us = 2 - 4*(0.5 - 0.5*abs((self.x - alter.x)/(dx)))**self.r
         Uf = 2 - 4*(0.5 + 0.5*abs((self.x - alter.x)/(dx)))**self.r
-        Ub = 2 - 4*(0.5 - 0.25*(abs(self.x - mu)+abs(self.x-alter.x))/dx)**self.r
-        Uw = 2 - 4*(0.5 + 0.25*(abs(self.x - mu)+abs(self.x-alter.x))/dx)**self.r
+        Ub = 2 - 4*(0.5 - 0.25*((abs(self.x - mu)+abs(self.x-alter.x))/dx))**self.r
+        Uw = 2 - 4*(0.5 + 0.25*((abs(self.x - mu)+abs(self.x-alter.x))/dx))**self.r
         Usq = 2 - 4*0.5**self.r
 
         self.basic_utilities[alter.name] = {"Us": Us,
@@ -69,6 +66,7 @@ class Actor(object):
         top = 0
         bottom = 0
         for agent in self.model.Actors:
+            if agent is self: continue
             d = abs(agent.x - alter.x) - abs(agent.x - self.x)
             if d > 0:
                 top += agent.c * agent.s * d
@@ -84,8 +82,8 @@ class Actor(object):
         utils = self.basic_utilities[alter.name]
         Q = self.model.Q
         T = self.model.T
-        s = self.s
-        EU = s * (p * utils["Us"] + (1-p)*utils["Uf"]) + (100-s)*utils["Us"]
+        s = alter.s
+        EU = s * (p * utils["Us"] + (1-p)*utils["Uf"]) + (1-s)*utils["Us"]
         EU -= Q*utils["Usq"] - (1-Q)*(T*utils["Ub"] + (1-T)*utils["Uw"])
         self.expected_utilities[alter.name] = EU
 
@@ -122,6 +120,7 @@ class Actor(object):
                             "EU": self.expected_utilities[actor.name]
                             }
                     actor.offers.append(offer)
+
     def choose_offer(self):
         '''
         Choose the offer to accept, and change position accordingly.
@@ -137,16 +136,16 @@ class Actor(object):
         Ui = self.expected_utilities[offer["Sender"]]
         if Ui > 0 and Ui < Uj:
             # There was a conflict, and this actor lost
-            print self.name + " changing position!"
+            print self.name + " loses confrontation to " + offer["Sender"]
             self.x = offer["x"]
             # If the actor won the conflict, action will be taken on the other end
         elif Ui < 0 and abs(Ui) < Uj:
             # Compromise
-            print self.name + " changing position!"
+            print self.name + " compromises with " + offer["Sender"]
             self.x += (offer["x"] - self.x) * abs(Ui/Uj)
         elif Ui < 0 and abs(Ui) > Uj:
             # Capituate
-            print self.name + " changing position!"
+            print self.name + " capituates to " + offer["Sender"]
             self.x = offer["x"]
 
         self.offers = [] # Reset offers
@@ -203,12 +202,39 @@ class Model(object):
         return t/w
 
 
-    def make_offers_happen(self):
+    def calculate_basic_utilities(self):
+        for actor in self.Actors:
+            for alter in self.Actors:
+                if actor is not alter:
+                    actor.calculate_utilities(alter)
+
+    def calculate_win_probabilities(self):
+        for actor in self.Actors:
+            for alter in self.Actors:
+                if actor is not alter:
+                    actor.calculate_prob(alter)
+    
+    def calculate_expected_utilities(self):
+        for actor in self.Actors:
+            for alter in self.Actors:
+                if actor is not alter:
+                    actor.calculate_expected_utility(alter)
+
+    def calculate_r(self):
+        for actor in self.Actors:
+            actor.calculate_r()
+
+
+    def make_offers(self):
         '''
         Each actor sends offers / challenges to others
         '''
         for actor in self.Actors:
             actor.send_offers()
+
+    def resolve_offers(self):
+        for actor in self.Actors:
+            actor.choose_offer()
 
     def determine_offers(self):
         '''
@@ -241,6 +267,42 @@ class Model(object):
                 else:
                     result = "Status Quo"
                 print actor1.name, actor2.name, result
+
+    def run_model(self):
+        '''
+        One step of the model.
+        '''
+        # 2. Let ri = 1
+        for actor in self.Actors:
+            actor.r = 1
+
+        #3. Compute median position mu
+        self.mu = self.find_mean()
+
+        #4. Calculate basic utilities
+        self.calculate_basic_utilities()
+
+        #5. Basic win popularities
+        self.calculate_win_probabilities()
+
+        #7. Calculate expected utilities
+        self.calculate_expected_utilities()
+
+        # 8, 9 Calculate R and r
+        self.calculate_r()
+
+        # 10. Now use the new r to repeat all the steps above
+        self.mu = self.find_mean()
+        
+        self.calculate_basic_utilities()
+        self.calculate_win_probabilities()
+        self.calculate_expected_utilities()
+
+        # Send and choose offers
+        self.make_offers()
+        self.resolve_offers()
+
+
 
 
 
