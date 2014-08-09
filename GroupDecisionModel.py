@@ -1,16 +1,44 @@
 '''
 Unravelling "Unravelling BDM's group decision model"
+===========================================================================
 
+This code attempts to replicate the model described by Sholz, Calbert and Smith
+(2011) [http://jtp.sagepub.com/content/23/4/510], which in turn is a replication
+of Bruce Bueno De Mesquita's group decision / expected utility model.   
+
+The code consists of an Actor class, which stores actor-level variables and 
+calculation methods, and a Model class to store the actors and streamline the 
+model execution.
+
+Some, but not all, the variable names correspond to their names in the paper.
+
+Much of the model deals with pairwise interactions; in the following code, 
+'alter' generally refers to the actor's counterpart in such an interaction, 
+often designated with a subscript j in the paper.
 '''
 
 from __future__ import division
-from collections import defaultdict
-import numpy as np
 
 
 class Actor(object):
     '''
     A BDM actor.
+
+    Actor attributes:
+        name: The actor's name; should be unique
+        x: Preferred outcome
+        c: Capability / power
+        s: Salience of the issue in question
+        r: Risk exponent. Recalculated every round.
+
+    Relational information (dictionaries, keyed on alter name):
+        basic_utilities: The actor's utilities if it wins, loses, etc. against
+                        this alter.
+        probs: Probability of winning a conflict with the given actor.
+        expected_utilities: The expected utility of challenging this actor.
+
+        offers: A list of incoming offers (which are really challenges). Reset 
+                each round.
     '''
 
     def __init__(self, name, model, x, c, s):
@@ -18,8 +46,8 @@ class Actor(object):
         Define a new actor.
 
         Args:
-            name: Come on.
-            model: The containing model object
+            name: Actor name.
+            model: The containing model object. 
             x: Preferred policy outcome
             c: Capability / power
             s: Salience
@@ -38,7 +66,12 @@ class Actor(object):
 
     def calculate_utilities(self, alter):
         '''
-        Calculate several utilities wrt a given alter
+        Calculate and set the base utilities wrt a given alter.
+
+        (See Section 3 of the paper)
+
+        Args:
+            alter: The counterpart Actor object.
         '''
         dx = self.model.xmax - self.model.xmin
         mu = self.model.mu
@@ -57,6 +90,17 @@ class Actor(object):
     def calculate_prob(self, alter):
         '''
         Calculate probability of winning against an alter.
+
+        (See Section 4 of the paper)
+
+        Args:
+            alter: The counterpart Actor object.
+
+        Note: The paper seems to  imply that the top of the Pi,j fraction is 
+        included only when it is greater than 0 (as in the commented-out code). 
+        However, that did not seem to produce correct results. The cited BDM
+        paper suggests something closer to the form executing below, though it
+        didn't (I think) contain the lower-bound. 
         '''
         # There won't be a contest against an alter with the same preference
         if self.x == alter.x:
@@ -66,16 +110,24 @@ class Actor(object):
         top = 0
         bottom = 0
         for agent in self.model.Actors:
-            if agent is self: continue
+            #if agent is self: continue
             d = abs(agent.x - alter.x) - abs(agent.x - self.x)
-            if d > 0:
-                top += agent.c * agent.s * d
+            top += agent.c * agent.s * d
+            #if d > 0:
+            #    top += agent.c * agent.s * d
             bottom += agent.c * agent.s * abs(d)
+        top = max(top, 0)
         self.probs[alter.name] = top/bottom
 
     def calculate_expected_utility(self, alter):
         '''
-        Expected utility against a given alter
+        Expected utility against a given alter. 
+        (See Section 2.2 of the paper)
+
+        Args:
+            alter: The counterpart Actor object.
+
+        Also uses the Q and T values set in the model object.
         '''
         # Local variables for ease of typing:
         p = self.probs[alter.name]
@@ -89,7 +141,8 @@ class Actor(object):
 
     def calculate_r(self):
         '''
-        Calculate the risk exponent
+        Calculate the risk exponent, after calculating E[U]s with r=1.
+        (See Section 5 of the paper)
         '''
 
         # Each other agent's expected utility of challenging this agent
@@ -110,6 +163,10 @@ class Actor(object):
     def send_offers(self):
         '''
         Send 'offers' of confrontation to different actors.
+        (See Section 6 of the paper)
+
+        The actor only challenges / sends an offer when the expected utility 
+        of challenging another actor > 0.
         '''
         for actor in self.model.Actors:
             if actor.name in self.expected_utilities:
@@ -124,6 +181,8 @@ class Actor(object):
     def choose_offer(self):
         '''
         Choose the offer to accept, and change position accordingly.
+        (See Section 6 of the paper)
+
         '''
         if len(self.offers) == 0: return
 
@@ -151,12 +210,25 @@ class Actor(object):
         self.offers = [] # Reset offers
 
 
-
-
-
 class Model(object):
     '''
-    A model container
+    A model container and calculation object. 
+
+    Stores the actors and model-level constants, and facilitates the main model
+    loop.
+
+    Attributes:
+        xmax: The maximum policy position / outcome preferred by any actor.
+        xmin: The minimum policy position / outcome preferred by any actor.
+        Q: Fixed probability assigned by all actors of alters changing position 
+            absent a challenge.
+        T: All actors' fixed probability assigned to alters changing position
+            *improving* things for the actor.
+        mu: Current mean position of all actors.
+
+    Actor storage:
+        Actors: List of all actors contained in the model.
+        actors: Name-keyed dictionary of the same Actor objects.
     '''
 
     def __init__(self, Actors, xmax, xmin, Q=1.0, T=1.0):
@@ -165,6 +237,8 @@ class Model(object):
         '''
 
         self.Actors = Actors
+        for actor in self.Actors:
+            actor.model = self
         self.xmax = xmax
         self.xmin = xmin
         self.dx = xmax - xmin
@@ -172,10 +246,19 @@ class Model(object):
         self.Q =  Q
         self.T = T
 
-    def vote(self, verbose=True):
+        self.actor = {actor.name: actor for actor in self.Actors}
+
+    def vote(self, verbose=False):
         '''
-        Find the current Condorcet winner
-        TODO: Make it the actual Condorcet winner though
+        Find the current Condorcet winner / median voting position.
+        (See Section 3.2 of the paper)
+        
+        Args:
+            verbose: If true, print out all the pairwise contests.
+        Returns:
+            The Condorcet winner of the pairwise contests.
+
+        TODO: Verify that this method results in the actual Condorcet winner.
         '''
         pairwise_contests = {}
         for j in self.Actors:
@@ -192,7 +275,12 @@ class Model(object):
 
     def find_mean(self):
         '''
-        Find the current mean voter position
+        Find the current mean voter position.
+        (NOT explicitly defined in the paper)
+
+        Returns:
+            Mean voter position. Does NOT necessarily correspond to a position 
+            held by any particular actor.
         '''
         t = 0 # Running weighted total
         w = 0 # Running total weight
@@ -203,74 +291,65 @@ class Model(object):
 
 
     def calculate_basic_utilities(self):
+        '''
+        Calculate each actor's basic utilities.
+        (Corresponds to Step 4 of the Appendix)
+        '''
         for actor in self.Actors:
             for alter in self.Actors:
                 if actor is not alter:
                     actor.calculate_utilities(alter)
 
     def calculate_win_probabilities(self):
+        '''
+        Calculate each actor's win probabilities against all others.
+        (Corresponds to Step 5 of the Appendix)
+        '''
         for actor in self.Actors:
             for alter in self.Actors:
                 if actor is not alter:
                     actor.calculate_prob(alter)
     
     def calculate_expected_utilities(self):
+        '''
+        Calculate each actor's expected utility against all others.
+        (Corresponds to Step 7 of the Appendix)
+        '''
         for actor in self.Actors:
             for alter in self.Actors:
                 if actor is not alter:
                     actor.calculate_expected_utility(alter)
 
     def calculate_r(self):
+        '''
+        Calculate each actor's risk coefficient.
+        (Corresponds to Steps 8, 9 of the Appendix)
+        '''
         for actor in self.Actors:
             actor.calculate_r()
 
 
     def make_offers(self):
         '''
-        Each actor sends offers / challenges to others
+        Each actor sends offers / challenges to others.
+        (Part of Step 11 of the Appendix)
         '''
         for actor in self.Actors:
             actor.send_offers()
 
     def resolve_offers(self):
+        '''
+        Each actor selects which offer to accede to.
+        (Second part of Step 11 of the Appendix)
+        '''
         for actor in self.Actors:
             actor.choose_offer()
 
-    def determine_offers(self):
-        '''
-        Figure out which octant each dyad is in
-        '''
-
-        for i, actor1 in enumerate(self.Actors):
-            for actor2 in self.Actors[i+1:]:
-                Ui = actor1.expected_utilities[actor2.name]
-                Uj = actor2.expected_utilities[actor1.name]
-                if Ui > 0:
-                    # Actor1 challenges
-                    if Uj > 0:
-                        # Conflict: Actor2 challenges as well.
-                        if Ui > Uj:
-                            #Confrontation, Actor 1 wins
-                            result = "Conflict, " + actor1.name + " wins."
-                        else:
-                            result = "Conflict, " + actor2.name + " wins."
-                    else:
-                        if abs(Uj) < Ui:
-                            result = "Compromise, " + actor1.name + " wins."
-                        else:
-                            result = "Compel, " + actor1.name + "wins"
-                elif Uj > 0:
-                    if abs(Ui) < Uj:
-                        result = "Compromise, " + actor2.name + " wins."
-                    else:
-                        result = "Complel, " + actor2.name + " wins."
-                else:
-                    result = "Status Quo"
-                print actor1.name, actor2.name, result
 
     def run_model(self):
         '''
-        One step of the model.
+        Run one whole step through the model procedure.
+        (Corresponds to steps 2-11 in the appendix)
         '''
         # 2. Let ri = 1
         for actor in self.Actors:
@@ -278,6 +357,7 @@ class Model(object):
 
         #3. Compute median position mu
         self.mu = self.find_mean()
+        #self.mu = self.vote(False)
 
         #4. Calculate basic utilities
         self.calculate_basic_utilities()
@@ -301,6 +381,37 @@ class Model(object):
         # Send and choose offers
         self.make_offers()
         self.resolve_offers()
+
+    def draw_quadrants(self, focus, ax, scale=1):
+        '''
+        Draws a BDM-style quadrant chart from the perspective of a given actor.
+
+        Args:
+            focus: The name of the actor to put on the X axis.
+            ax: Matplotlib subplot object to draw to.
+            scale: Scale the axes from (-scale, scale)
+
+        '''
+        # Put the spines through the origin
+        ax.spines['left'].set_position('zero')
+        ax.spines['right'].set_color('none')
+        ax.spines['bottom'].set_position('zero')
+        ax.spines['top'].set_color('none')
+        #ax.spines['left'].set_smart_bounds(True)
+        #ax.spines['bottom'].set_smart_bounds(True)
+        ax.xaxis.set_ticks_position('bottom')
+        ax.yaxis.set_ticks_position('left')
+        ax.set_xlim(-scale,scale)
+        ax.set_ylim(-scale,scale)
+
+        actor = self.actor[focus]
+        for alter in self.Actors:
+            if actor is alter: continue
+            x = actor.expected_utilities[alter.name]
+            y = alter.expected_utilities[actor.name]
+            ax.text(x,y, alter.name)
+        return ax
+
 
 
 
