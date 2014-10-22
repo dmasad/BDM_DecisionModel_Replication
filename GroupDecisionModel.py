@@ -356,8 +356,8 @@ class Model(object):
             actor.r = 1
 
         #3. Compute median position mu
-        self.mu = self.find_mean()
-        #self.mu = self.vote(False)
+        #self.mu = self.find_mean()
+        self.mu = self.vote(False)
 
         #4. Calculate basic utilities
         self.calculate_basic_utilities()
