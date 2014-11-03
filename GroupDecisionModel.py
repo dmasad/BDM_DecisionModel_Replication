@@ -1,3 +1,4 @@
+from __future__ import division
 
 class Actor(object):
     '''
@@ -33,7 +34,7 @@ class Actor(object):
 
     def vote(self, x_j, x_k):
         '''
-        Allocate capacity- and salience-weighted votes to x_j over x_k
+        Allocate capacity- and salience-weighted votes to x_j over x_k.
         '''
         dx = self.model.position_range
         x_k_dist = (abs(self.x - x_k) / dx)**self.r
@@ -87,6 +88,197 @@ class Actor(object):
 
         Follows the Scholz et al. methodology.
         '''
+        if actor.x == alter.x:
+            return 0
+
+        # Sum the magnitudes of all possible votes:
+        all_positions = self.model.get_positions()
+        all_votes = 0
+        for an_actor in self.model.actors:
+            for x_j in all_positions:
+                for x_k in all_positions:
+                    all_votes += abs(an_actor.vote(x_j, x_k))
+
+        # Sum votes for the position of actor vs alter:
+        votes = 0
+        for an_actor in self.model.actors:
+            v = an_actor.vote(actor.x, alter.x)
+            if v > 0:
+                votes += v
+
+        return votes / all_votes
+
+    # ---------------------------------------------------------
+
+    def calculate_r(self):
+        '''
+        Calculate the risk exponent.
+        '''
+        self.r = 1
+
+        # Each agent's expected utility from challengin this agent.
+        attack_utils = [self.expected_utility(alter, self) 
+                            for alter in self.model.actors if alter is not self]
+
+        security_levels = []
+        for actor in self.model.actors:
+            security = sum([self.expected_utility(alter, actor) 
+                for alter in self.model.actors if alter is not actor])
+            security_levels.append(security)
+
+        max_security = max(security_levels)
+        min_security = min(security_levels)
+
+        R = (2 * sum(attack_utils) - max_security - min_security) 
+        R /= (max_security - min_security)
+
+        self.r = (1 -  R / 3.0) / (1 + R / 3.0)
+
+    def send_offers(self):
+        '''
+        Send 'offers' of confrontation to different actors
+        '''
+        for alter in self.model.actors:
+            if self.x == alter.x: continue
+            if alter.expected_utility(self, alter) > 0:
+                Uj = alter.expected_utility(self, alter)
+                Ui = alter.expected_utility(alter, self)
+                offer_type = False
+                # Figure out types:
+                if Uj > Ui > 0:
+                    offer_type = "Challenge"
+                elif Ui > Uj > 0:
+                    # Will be handled on the other side
+                    pass
+                elif Ui < 0 and Uj > abs(Ui):
+                    offer_type = "Compromise"
+                elif Ui < 0 and Uj < abs(Ui):
+                    offer_type = "Capitulate"
+                else:
+                    print self.name, alter.name
+                    raise Exception("Shouldn't be here!")
+
+                if offer_type:
+                    # Send the challenge
+                    offer = {"Sender": self.name,
+                            "x": self.x,
+                            "Ui": Ui,
+                            "Uj": Uj,
+                            "type": offer_type}
+                    alter.offers.append(offer)
+
+    def choose_offer(self):
+        '''
+        Choose an offer to accept, and change position accordingly.
+        '''
+
+        offer_types = [offer["type"] for offer in self.offers]
+        best_offer = False
+        if "Challenge" in offer_types:
+            offers = [o for o in self.offers if o["type"] == "Challenge"]
+            best_offer = min(offers, key=lambda o: abs(o["x"] - self.x))
+        elif "Compromise" in offer_types:
+            offers = [o for o in self.offers if o["type"] == "Compromise"]
+            best_offer = min(offers, 
+                key=lambda o: ( (o["Ui"]*self.x + o["Uj"]*o["x"])
+                    / (abs(o["Ui"]) + abs(o["Uj"])) ))
+        elif "Capitulate" in offer_types:
+            offers = [o for o in self.offers if o["type"] == "Capitulate"]
+            best_offer = min(offers, key=lambda o: abs(o["x"] - self.x))
+
+        if best_offer:
+            if best_offer["type"] == "Challenge":
+                print self.name + " loses challenge to " + best_offer["Sender"]
+                self.x = best_offer["x"]
+                print "\tNew position: " + str(self.x)
+            elif best_offer["type"] == "Compromise":
+                print self.name + " compromises with " + best_offer["Sender"]
+                Ui = best_offer["Ui"]
+                Uj = best_offer["Uj"]
+                self.x += (best_offer["x"] - self.x) * abs(Ui / Uj)
+                print "\tNew position: " + str(self.x)
+            elif best_offer["type"] == "Capitulate":
+                print self.name + " capitulates to " + best_offer["Sender"]
+                self.x = best_offer["x"]
+                print "\tNew position: " + str(self.x)
+
+    # Some utility methods
+    def __repr__(self):
+        return self.name + str({"x": self.x, "c": self.c, "s": self.s, 
+                                    "r": self.r})
+
+    def __str__(self):
+        return self.__repr__()
+
+
+class Model(object):
+
+    def __init__(self, actors, Q=1.0):
+        '''
+        Initiate a new model with pre-created actors.
+        '''
+        self.Q = Q
+        self.actors = actors
+        self.actors_by_name = {}
+        for actor in self.actors:
+            actor.model = self
+            self.actors_by_name[actor.name] = actor
+
+        positions = self.get_positions()
+        self.position_range = max(positions) - min(positions)
+
+    def get_positions(self):
+        '''
+        Returns a list of every position currently held.
+        '''
+        return [actor.x for actor in self.actors]
+
+    def median_position(self):
+        '''
+        Find median position.
+        '''
+        positions = self.get_positions()
+        median = positions[0]
+        for position in positions[1:]:
+            votes = 0
+            for actor in self.actors:
+                votes += actor.vote(position, median)
+            if votes > 0:
+                median = position
+        return median
+
+    def mean_position(self):
+        top = 0
+        bottom = 0
+        for actor in self.actors:
+            d = actor.s * actor.c
+            bottom += d
+            top += d * actor.x
+        return top / bottom
+
+    def update_risk_tolerance(self):
+        for actor in self.actors:
+            actor.calculate_r()
+
+    def send_all_offers(self):
+        for actor in self.actors:
+            actor.send_offers()
+
+    def evaluate_offers(self):
+        for actor in self.actors:
+            actor.choose_offer()
+
+
+    def __str__(self):
+        out = ""
+        for actor in self.actors:
+            out += str(actor) + "\n"
+        return out
+
+    def __getitem__(self, index):
+        return self.actors_by_name[index]
+
+
 
         
 
