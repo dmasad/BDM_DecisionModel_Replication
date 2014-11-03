@@ -60,4 +60,35 @@ class Actor(object):
         '''
         dx = self.model.position_range
         return 2 - 4*(0.5 + 0.5*abs((actor.x - alter.x)/(dx)))**self.r
+
+    def u_sq(self):
+        '''
+        Subjective utility of the status quo
+        '''
+        return 2 - 4 * (0.5**self.r)
+
+    def expected_utility(self, actor, alter):
+        '''
+        Subjective expected utility of actor challenging alter.
+
+        Currently ignores the T part of the equation altogether.
+        '''
+        p = self.probability(actor, alter)
+        Us = self.u_success(actor, alter)
+        Uf = self.u_failure(actor, alter)
+        Usq = self.u_sq()
+        s = alter.s
+
+        return s*(p*Us + (1-p)*Uf) + (1-s)*Us - self.model.Q * Usq
+
+    def probability(self, actor, alter):
+        '''
+        Probability of actor successfully challenging alter.
+
+        Follows the Scholz et al. methodology.
+        '''
+
+        
+
+
     
