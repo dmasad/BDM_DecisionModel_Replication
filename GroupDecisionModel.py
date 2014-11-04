@@ -188,19 +188,22 @@ class Actor(object):
 
         if best_offer:
             if best_offer["type"] == "Challenge":
-                print self.name + " loses challenge to " + best_offer["Sender"]
                 self.x = best_offer["x"]
-                print "\tNew position: " + str(self.x)
+                if self.model.verbose:
+                    print self.name + " loses challenge to " + best_offer["Sender"]
+                    print "\tNew position: " + str(self.x)
             elif best_offer["type"] == "Compromise":
-                print self.name + " compromises with " + best_offer["Sender"]
                 Ui = best_offer["Ui"]
                 Uj = best_offer["Uj"]
                 self.x += (best_offer["x"] - self.x) * abs(Ui / Uj)
-                print "\tNew position: " + str(self.x)
+                if self.model.verbose:
+                    print self.name + " compromises with " + best_offer["Sender"]
+                    print "\tNew position: " + str(self.x)
             elif best_offer["type"] == "Capitulate":
-                print self.name + " capitulates to " + best_offer["Sender"]
                 self.x = best_offer["x"]
-                print "\tNew position: " + str(self.x)
+                if self.model.verbose:
+                    print self.name + " capitulates to " + best_offer["Sender"]
+                    print "\tNew position: " + str(self.x)
 
     # Some utility methods
     def __repr__(self):
@@ -213,11 +216,12 @@ class Actor(object):
 
 class Model(object):
 
-    def __init__(self, actors, Q=1.0):
+    def __init__(self, actors, Q=1.0, verbose=True):
         '''
         Initiate a new model with pre-created actors.
         '''
         self.Q = Q
+        self.verbose = verbose
         self.actors = actors
         self.actors_by_name = {}
         for actor in self.actors:
@@ -226,6 +230,9 @@ class Model(object):
 
         positions = self.get_positions()
         self.position_range = max(positions) - min(positions)
+
+        self.median_positions = []
+        self.mean_positions = []
 
     def get_positions(self):
         '''
@@ -266,7 +273,68 @@ class Model(object):
 
     def evaluate_offers(self):
         for actor in self.actors:
-            actor.choose_offer()
+            actor.choose_offer()        
+
+    def next_step(self):
+        '''
+        Run one step of the model.
+        '''
+        self.update_risk_tolerance()
+        self.send_all_offers()
+        self.evaluate_offers()
+
+    def run_model(self, n):
+        '''
+        Run the model for n rounds.
+        '''
+        median = self.median_position()
+        mean = self.mean_position()
+
+        self.median_positions.append(median)
+        self.mean_positions.append(mean)
+        if self.verbose:
+            print "\tMedian: " + str(median)
+            print "\tMean: " + str(mean)
+        
+        for i in range(1, n+1):
+            if self.verbose:
+                print "\nROUND " + str(i)
+            self.next_step()
+
+            for actor in self.actors:
+                actor.r = 1
+                actor.offers = []
+
+            median = self.median_position()
+            mean = self.mean_position()
+            self.median_positions.append(median)
+            self.mean_positions.append(mean)
+            
+            if self.verbose:
+                print "\n\tMedian: " + str(median)
+                print "\tMean: " + str(mean)
+            
+    
+    @staticmethod
+    def from_dataframe(df, col_mapping={}, Q=1.0, verbose=True):
+        '''
+        Load actor data from a Pandas dataframe and instantiate a model.
+        '''
+        name_col = col_mapping["name"] if "name" in col_mapping else "name"
+        x_col = col_mapping["x"] if "x" in col_mapping else "x"
+        s_col = col_mapping["s"] if "s" in col_mapping else "s"
+        c_col = col_mapping["c"] if "c" in col_mapping else "c"
+
+        actors = []
+        for row in df.iterrows():
+            row = row[1]
+            actor = Actor(row[name_col], row[x_col], row[c_col], row[s_col])
+            actors.append(actor)
+        model = Model(actors, Q, verbose)
+        for actor in model.actors:
+            actor.model = model
+        return model
+
 
 
     def __str__(self):
