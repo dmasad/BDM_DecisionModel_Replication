@@ -1,4 +1,5 @@
 from __future__ import division
+import random
 
 class Actor(object):
     '''
@@ -313,7 +314,35 @@ class Model(object):
             if self.verbose:
                 print "\n\tMedian: " + str(median)
                 print "\tMean: " + str(mean)
-            
+
+    def perturb_salience(self, sd, absolute=False):
+        '''
+        Randomly add noise to each actor's salience. 
+
+        Noise is drawn from a normal distribution with mu=0 and given sd
+        '''
+
+        for actor in self.actors:
+            noise = random.normalvariate(0, sd)
+            if absolute:
+                actor.s += noise
+            else:
+                actor.s += actor.s * noise
+
+            if actor.s <= 0:
+                actor.s = 0.01 # Small number
+            if actor.s > 1:
+                actor.s = 1
+
+    def __str__(self):
+        out = ""
+        for actor in self.actors:
+            out += str(actor) + "\n"
+        return out
+
+    def __getitem__(self, index):
+        return self.actors_by_name[index]
+
     
     @staticmethod
     def from_dataframe(df, col_mapping={}, Q=1.0, verbose=True):
@@ -336,15 +365,6 @@ class Model(object):
         return model
 
 
-
-    def __str__(self):
-        out = ""
-        for actor in self.actors:
-            out += str(actor) + "\n"
-        return out
-
-    def __getitem__(self, index):
-        return self.actors_by_name[index]
 
 
 
